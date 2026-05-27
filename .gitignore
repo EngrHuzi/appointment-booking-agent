@@ -1,0 +1,40 @@
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[oc]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# ── Secrets — NEVER commit ────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+# Allow example files
+!.env.example
+
+# ── Database ──────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Node / Next.js ────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+.turbo/
+
+# ── OS ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.user
+
+# ── Misc ─────────────────────────────────────────────────────────
+test_chat.py
+*.log
