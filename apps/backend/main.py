@@ -183,6 +183,8 @@ async def get_bookings():
 
     async with Client(MCP_SERVER_URL) as client:
         result = await client.call_tool("list_appointments", {})
+        if not result.content:
+            return []
         return json.loads(result.content[0].text)
 
 
@@ -229,6 +231,8 @@ async def get_closures():
 
     async with Client(MCP_SERVER_URL) as client:
         result = await client.call_tool("get_closed_dates", {})
+        if not result.content:
+            return []
         return json.loads(result.content[0].text)
 
 
