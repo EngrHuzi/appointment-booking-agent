@@ -131,3 +131,56 @@ body::before {
 .animate-fade-in  { animation: fadeIn   0.3s  ease both; }
 .animate-slide-up { animation: slideUp  0.5s  cubic-bezier(0.16,1,0.3,1) both; }
 .animate-float-in { animation: floatIn  0.45s cubic-bezier(0.16,1,0.3,1) both; }
+
+/* ─── iOS safe area ─────────────────────────────────────────────── */
+.safe-bottom {
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+
+/* ─── Mobile responsive ─────────────────────────────────────────── */
+@media (max-width: 767px) {
+  /* Chat — wider bubbles, less margin */
+  .msg-bubble-wrap { max-width: min(85%, 340px) !important; }
+  .quick-replies   { margin-left: 10px !important; }
+
+  /* Chat header — hide location label on tiny screens */
+  .chat-location { display: none; }
+
+  /* Chat footer hint */
+  .chat-hint { display: none; }
+
+  /* Dashboard header — two-row layout */
+  .dash-header-row { height: auto !important; flex-wrap: wrap; padding: 10px 16px !important; gap: 8px; }
+  .dash-header-title { font-size: 18px !important; }
+  .dash-header-actions { gap: 6px; }
+  .dash-header-actions span { display: none; } /* hide timestamp */
+
+  /* Dashboard stats — 2×2 */
+  .dash-stats { grid-template-columns: repeat(2,1fr) !important; gap: 10px !important; margin-bottom: 18px !important; }
+  .dash-stats-value { font-size: 28px !important; }
+
+  /* Dashboard content padding */
+  .dash-content { padding: 16px 12px 48px !important; }
+
+  /* Dashboard tabs */
+  .dash-tabs button { padding: 8px 12px !important; font-size: 12px !important; }
+
+  /* Reschedule form — no left offset */
+  .reschedule-form { padding-left: 16px !important; flex-wrap: wrap; }
+
+  /* Today card — stack email below name */
+  .today-card-meta { display: none; }
+
+  /* Closures form — already wraps, just tighten */
+  .closures-form { gap: 8px !important; }
+
+  /* Action buttons smaller */
+  .action-btn { padding: 5px 9px !important; font-size: 10px !important; }
+}
+
+@media (max-width: 480px) {
+  /* Even smaller phones */
+  .dash-header-actions .csv-btn { display: none; } /* hide CSV, accessible via tab still */
+  .dash-stats-label { font-size: 9px !important; }
+  .msg-bubble-wrap { max-width: min(90%, 320px) !important; }
+}

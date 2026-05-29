@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import BookingCard from './BookingCard'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 interface BookingDetails {
   booking_id: string
@@ -36,6 +37,7 @@ export default function ChatWidget() {
   const [focused, setFocused]     = useState(false)
   const bottomRef                 = useRef<HTMLDivElement>(null)
   const inputRef                  = useRef<HTMLTextAreaElement>(null)
+  const isMobile                  = useIsMobile()
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -199,11 +201,11 @@ export default function ChatWidget() {
         {/* Wordmark */}
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
           <p style={{
-            fontFamily: 'var(--font-cormorant)', fontSize: '15px',
+            fontFamily: 'var(--font-cormorant)', fontSize: isMobile ? '13px' : '15px',
             color: 'var(--gold-lt)', letterSpacing: '0.12em',
             fontStyle: 'italic', opacity: 0.75, lineHeight: 1,
           }}>Huzi Salon</p>
-          <p style={{
+          <p className="chat-location" style={{
             color: 'var(--cream-ghost)', fontSize: '9px',
             letterSpacing: '0.18em', textTransform: 'uppercase',
             marginTop: '2px',
@@ -231,7 +233,7 @@ export default function ChatWidget() {
 
         {/* Quick replies — shown only on fresh welcome state */}
         {showQuickReplies && (
-          <div style={{
+          <div className="quick-replies" style={{
             marginTop: '8px', marginLeft: '38px',
             display: 'flex', flexWrap: 'wrap', gap: '8px',
             animation: 'floatIn 0.5s cubic-bezier(0.16,1,0.3,1) 0.35s both',
@@ -248,8 +250,8 @@ export default function ChatWidget() {
       </div>
 
       {/* ── Input area ───────────────────────────────────────────── */}
-      <div style={{
-        flexShrink: 0, padding: '12px 16px 20px',
+      <div className="safe-bottom" style={{
+        flexShrink: 0, padding: isMobile ? '10px 12px 16px' : '12px 16px 20px',
         background: 'var(--bg-surface)',
         borderTop: '1px solid var(--border)',
         position: 'relative', zIndex: 2,
@@ -315,7 +317,7 @@ export default function ChatWidget() {
           </button>
         </div>
 
-        <p style={{
+        <p className="chat-hint" style={{
           textAlign: 'center', fontSize: '10px',
           color: 'var(--cream-dim)', marginTop: '7px',
           letterSpacing: '0.05em',
@@ -386,7 +388,7 @@ function MessageBubble({ msg, index }: { msg: Message; index: number }) {
         </div>
       )}
 
-      <div style={{ maxWidth: 'min(74%, 310px)' }}>
+      <div className="msg-bubble-wrap" style={{ maxWidth: 'min(74%, 310px)' }}>
         {msg.content && (
           <div style={isUser ? {
             background: 'var(--bubble-user)',

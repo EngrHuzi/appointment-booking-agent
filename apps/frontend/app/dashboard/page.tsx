@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 const STORAGE_KEY = 'salon_dashboard_key'
 
@@ -156,6 +157,7 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
   const [rescheduleDate, setRescheduleDate] = useState('')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const isMobile = useIsMobile()
 
   const confirmed   = bookings.filter(b => b.status === 'confirmed').length
   const rescheduled = bookings.filter(b => b.status === 'rescheduled').length
@@ -187,7 +189,7 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
   return (
     <div>
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '14px', marginBottom: '24px' }}>
+      <div className="dash-stats" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: '14px', marginBottom: '24px' }}>
         {[
           { label: 'Total',       value: bookings.length, color: '#D4AF62' },
           { label: 'Confirmed',   value: confirmed,       color: '#4ade80' },
@@ -195,8 +197,8 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
           { label: 'Cancelled',   value: cancelled,       color: '#f87171' },
         ].map(s => (
           <div key={s.label} style={{ padding: '18px 20px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '12px' }}>
-            <p style={{ color: 'var(--cream-muted)', fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: '6px' }}>{s.label}</p>
-            <p style={{ fontFamily: 'var(--font-cormorant)', fontSize: '32px', fontWeight: 500, color: s.color, lineHeight: 1 }}>{s.value}</p>
+            <p className="dash-stats-label" style={{ color: 'var(--cream-muted)', fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: '6px' }}>{s.label}</p>
+            <p className="dash-stats-value" style={{ fontFamily: 'var(--font-cormorant)', fontSize: '32px', fontWeight: 500, color: s.color, lineHeight: 1 }}>{s.value}</p>
           </div>
         ))}
       </div>
@@ -209,9 +211,9 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
 
       {/* Table */}
       <div style={{ overflowX: 'auto', borderRadius: '14px', border: '1px solid var(--border)' }}>
-      <div style={{ background: 'var(--bg-surface)', borderRadius: '14px', overflow: 'hidden', minWidth: '860px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 110px 170px 120px 160px', padding: '0 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-raised)' }}>
-          {['Booking ID', 'Client', 'Service', 'Date & Time', 'Status', 'Actions'].map(col => (
+      <div style={{ background: 'var(--bg-surface)', borderRadius: '14px', overflow: 'hidden', minWidth: isMobile ? '400px' : '860px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '80px 1fr 100px 80px' : '90px 1fr 110px 170px 120px 160px', padding: '0 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-raised)' }}>
+          {(isMobile ? ['ID', 'Client', 'Service', 'Actions'] : ['Booking ID', 'Client', 'Service', 'Date & Time', 'Status', 'Actions']).map(col => (
             <div key={col} style={{ padding: '11px 8px', color: 'var(--cream-muted)', fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase' }}>{col}</div>
           ))}
         </div>
@@ -225,7 +227,7 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
         {bookings.map((b, i) => (
           <div key={b.id}>
             <div
-              style={{ display: 'grid', gridTemplateColumns: '90px 1fr 110px 170px 120px 160px', padding: '0 16px', borderBottom: i < bookings.length - 1 ? '1px solid rgba(196,146,62,0.07)' : 'none' }}
+              style={{ display: 'grid', gridTemplateColumns: isMobile ? '80px 1fr 100px 80px' : '90px 1fr 110px 170px 120px 160px', padding: '0 16px', borderBottom: i < bookings.length - 1 ? '1px solid rgba(196,146,62,0.07)' : 'none' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'rgba(196,146,62,0.03)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
@@ -233,29 +235,34 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
                 <span style={{ color: '#D4AF62', fontSize: '11px', fontWeight: 500 }}>#{b.id}</span>
               </div>
               <div style={{ padding: '14px 8px' }}>
-                <p style={{ color: 'var(--cream)', fontSize: '13px', marginBottom: '2px' }}>{b.client_name}</p>
-                <p style={{ color: 'var(--cream-dim)', fontSize: '11px' }}>{b.client_email}</p>
+                <p style={{ color: 'var(--cream)', fontSize: isMobile ? '12px' : '13px', marginBottom: '2px' }}>{b.client_name}</p>
+                {!isMobile && <p style={{ color: 'var(--cream-dim)', fontSize: '11px' }}>{b.client_email}</p>}
+                {isMobile && <StatusBadge status={b.status} />}
               </div>
               <div style={{ padding: '14px 8px', display: 'flex', alignItems: 'center' }}>
                 <div>
                   <p style={{ color: 'var(--cream-muted)', fontSize: '12px' }}>{b.service.charAt(0).toUpperCase() + b.service.slice(1)}</p>
-                  <p style={{ color: 'var(--cream-dim)', fontSize: '11px' }}>{b.duration_minutes} min</p>
+                  {!isMobile && <p style={{ color: 'var(--cream-dim)', fontSize: '11px' }}>{b.duration_minutes} min</p>}
                 </div>
               </div>
-              <div style={{ padding: '14px 8px', display: 'flex', alignItems: 'center' }}>
-                <span style={{ color: 'var(--cream-muted)', fontSize: '12px' }}>{fmtDT(b.datetime)}</span>
-              </div>
-              <div style={{ padding: '14px 8px', display: 'flex', alignItems: 'center' }}>
-                <StatusBadge status={b.status} />
-              </div>
-              <div style={{ padding: '14px 8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {!isMobile && (
+                <div style={{ padding: '14px 8px', display: 'flex', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--cream-muted)', fontSize: '12px' }}>{fmtDT(b.datetime)}</span>
+                </div>
+              )}
+              {!isMobile && (
+                <div style={{ padding: '14px 8px', display: 'flex', alignItems: 'center' }}>
+                  <StatusBadge status={b.status} />
+                </div>
+              )}
+              <div style={{ padding: '14px 8px', display: 'flex', alignItems: 'center', gap: '4px', flexDirection: isMobile ? 'column' : 'row' }}>
                 {b.status !== 'cancelled' && (
                   <>
                     <Btn variant="ghost" disabled={actionLoading === b.id} onClick={() => { setRescheduleId(rescheduleId === b.id ? null : b.id); setRescheduleDate(''); setActionError(null) }}>
-                      Reschedule
+                      {isMobile ? '↻' : 'Reschedule'}
                     </Btn>
                     <Btn variant="danger" disabled={actionLoading === b.id} onClick={() => handleCancel(b.id)}>
-                      {actionLoading === b.id ? '…' : 'Cancel'}
+                      {actionLoading === b.id ? '…' : isMobile ? '✕' : 'Cancel'}
                     </Btn>
                   </>
                 )}
@@ -264,7 +271,7 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
 
             {/* Inline reschedule form */}
             {rescheduleId === b.id && (
-              <div style={{ padding: '12px 16px 14px 110px', borderBottom: i < bookings.length - 1 ? '1px solid rgba(196,146,62,0.07)' : 'none', background: 'rgba(196,146,62,0.04)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div className="reschedule-form" style={{ padding: isMobile ? '12px 16px 14px' : '12px 16px 14px 110px', borderBottom: i < bookings.length - 1 ? '1px solid rgba(196,146,62,0.07)' : 'none', background: 'rgba(196,146,62,0.04)', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 <input
                   type="datetime-local"
                   value={rescheduleDate}
@@ -292,6 +299,7 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
 // ─── Today Tab ───────────────────────────────────────────────────────────────
 
 function TodayTab({ bookings }: { bookings: Booking[] }) {
+  const isMobile = useIsMobile()
   const today = todayStr()
   const todayBookings = bookings.filter(b => b.datetime.startsWith(today))
   const dateLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
@@ -328,7 +336,7 @@ function TodayTab({ bookings }: { bookings: Booking[] }) {
                     <p style={{ color: 'var(--cream)', fontSize: '14px', marginBottom: '2px' }}>{b.client_name}</p>
                     <p style={{ color: 'var(--cream-muted)', fontSize: '12px' }}>{b.service.charAt(0).toUpperCase() + b.service.slice(1)} · {b.duration_minutes} min</p>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div className="today-card-meta" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <span style={{ color: 'var(--cream-dim)', fontSize: '11px' }}>{b.client_email}</span>
                     <StatusBadge status={b.status} />
                   </div>
@@ -467,6 +475,7 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
   const [activeTab, setActiveTab] = useState<Tab>('all')
   const [lastRefresh, setLastRefresh] = useState(new Date())
   const [refreshKey, setRefreshKey] = useState(0)
+  const isMobile = useIsMobile()
 
   async function load() {
     setLoading(true)
@@ -490,20 +499,20 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
       {/* Header */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'rgba(11,7,5,0.92)', backdropFilter: 'blur(12px)', borderBottom: '1px solid var(--border)' }}>
         <div style={{ maxWidth: '1140px', margin: '0 auto', padding: '0 24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '58px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
-              <h1 style={{ fontFamily: 'var(--font-cormorant)', fontSize: '22px', fontWeight: 500, color: 'var(--cream)' }}>Huzi Salon</h1>
-              <span style={{ color: 'var(--cream-dim)', fontSize: '12px' }}>/ Dashboard</span>
+          <div className="dash-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '58px', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }}>
+              <h1 className="dash-header-title" style={{ fontFamily: 'var(--font-cormorant)', fontSize: '22px', fontWeight: 500, color: 'var(--cream)', whiteSpace: 'nowrap' }}>Huzi Salon</h1>
+              {!isMobile && <span style={{ color: 'var(--cream-dim)', fontSize: '12px' }}>/ Dashboard</span>}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ color: 'var(--cream-dim)', fontSize: '11px' }}>
+            <div className="dash-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <span style={{ color: 'var(--cream-dim)', fontSize: '11px', whiteSpace: 'nowrap' }}>
                 {lastRefresh.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
               </span>
               {activeTab === 'all' && bookings.length > 0 && (
                 <Btn variant="outline" onClick={() => exportCSV(bookings)}>↓ CSV</Btn>
               )}
               <Btn variant="ghost" disabled={loading} onClick={load}>{loading ? '…' : 'Refresh'}</Btn>
-              <Btn variant="danger" onClick={onLogout}>Sign out</Btn>
+              <Btn variant="danger" onClick={onLogout}>{isMobile ? '⏻' : 'Sign out'}</Btn>
             </div>
           </div>
 
@@ -524,7 +533,7 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
       </div>
 
       {/* Content */}
-      <div style={{ maxWidth: '1140px', margin: '0 auto', padding: '28px 24px 48px' }}>
+      <div className="dash-content" style={{ maxWidth: '1140px', margin: '0 auto', padding: isMobile ? '16px 12px 48px' : '28px 24px 48px' }}>
         {loading && activeTab !== 'closures' && (
           <div style={{ textAlign: 'center', padding: '64px', color: 'var(--cream-dim)' }}>Loading…</div>
         )}
