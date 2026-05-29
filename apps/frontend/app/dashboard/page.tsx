@@ -341,7 +341,7 @@ function TodayTab({ bookings }: { bookings: Booking[] }) {
 
 // ─── Closures Tab ────────────────────────────────────────────────────────────
 
-function ClosuresTab({ apiKey }: { apiKey: string }) {
+function ClosuresTab({ apiKey, refreshKey }: { apiKey: string; refreshKey: number }) {
   const [closures, setClosures] = useState<Closure[]>([])
   const [loading, setLoading] = useState(true)
   const [newDate, setNewDate] = useState('')
@@ -357,7 +357,7 @@ function ClosuresTab({ apiKey }: { apiKey: string }) {
     setLoading(false)
   }
 
-  useEffect(() => { loadClosures() }, [])
+  useEffect(() => { loadClosures() }, [refreshKey])
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -462,6 +462,7 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<Tab>('all')
   const [lastRefresh, setLastRefresh] = useState(new Date())
+  const [refreshKey, setRefreshKey] = useState(0)
 
   async function load() {
     setLoading(true)
@@ -469,6 +470,7 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
     if (res.ok) setBookings(await res.json())
     setLastRefresh(new Date())
     setLoading(false)
+    setRefreshKey(k => k + 1)
   }
 
   useEffect(() => { load() }, [])
@@ -524,7 +526,7 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
         )}
         {!loading && activeTab === 'all' && <AllBookingsTab bookings={bookings} apiKey={apiKey} onRefresh={load} />}
         {!loading && activeTab === 'today' && <TodayTab bookings={bookings} />}
-        {activeTab === 'closures' && <ClosuresTab apiKey={apiKey} />}
+        {activeTab === 'closures' && <ClosuresTab apiKey={apiKey} refreshKey={refreshKey} />}
       </div>
     </div>
   )
