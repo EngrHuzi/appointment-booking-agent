@@ -58,7 +58,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_methods=["POST", "GET", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -183,6 +183,85 @@ async def get_bookings():
 
     async with Client(MCP_SERVER_URL) as client:
         result = await client.call_tool("list_appointments", {})
+        return json.loads(result.content[0].text)
+
+
+@app.post(
+    "/bookings/{booking_id}/cancel",
+    summary="Cancel a booking (salon owner only)",
+    dependencies=[Depends(require_api_key)],
+)
+async def cancel_booking(booking_id: str):
+    from fastmcp import Client
+
+    async with Client(MCP_SERVER_URL) as client:
+        result = await client.call_tool("cancel_appointment", {"booking_id_or_email": booking_id})
+        return json.loads(result.content[0].text)
+
+
+class RescheduleRequest(BaseModel):
+    new_datetime: str
+
+
+@app.post(
+    "/bookings/{booking_id}/reschedule",
+    summary="Reschedule a booking (salon owner only)",
+    dependencies=[Depends(require_api_key)],
+)
+async def reschedule_booking(booking_id: str, body: RescheduleRequest):
+    from fastmcp import Client
+
+    async with Client(MCP_SERVER_URL) as client:
+        result = await client.call_tool(
+            "reschedule_appointment",
+            {"booking_id_or_email": booking_id, "new_datetime_str": body.new_datetime},
+        )
+        return json.loads(result.content[0].text)
+
+
+@app.get(
+    "/closures",
+    summary="List all closed dates (salon owner only)",
+    dependencies=[Depends(require_api_key)],
+)
+async def get_closures():
+    from fastmcp import Client
+
+    async with Client(MCP_SERVER_URL) as client:
+        result = await client.call_tool("get_closed_dates", {})
+        return json.loads(result.content[0].text)
+
+
+class ClosureRequest(BaseModel):
+    date: str
+    reason: str = ""
+
+
+@app.post(
+    "/closures",
+    summary="Add a closed date (salon owner only)",
+    dependencies=[Depends(require_api_key)],
+)
+async def add_closure(body: ClosureRequest):
+    from fastmcp import Client
+
+    async with Client(MCP_SERVER_URL) as client:
+        result = await client.call_tool(
+            "add_closed_date", {"date": body.date, "reason": body.reason}
+        )
+        return json.loads(result.content[0].text)
+
+
+@app.delete(
+    "/closures/{date}",
+    summary="Remove a closed date (salon owner only)",
+    dependencies=[Depends(require_api_key)],
+)
+async def remove_closure(date: str):
+    from fastmcp import Client
+
+    async with Client(MCP_SERVER_URL) as client:
+        result = await client.call_tool("remove_closed_date", {"date": date})
         return json.loads(result.content[0].text)
 
 

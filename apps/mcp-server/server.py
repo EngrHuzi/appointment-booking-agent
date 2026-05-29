@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -11,6 +12,11 @@ import database as db
 import email_service as email
 
 db.init_db()
+
+
+def _fmt_slot(iso: str) -> str:
+    dt = datetime.fromisoformat(iso)
+    return dt.strftime("%A, %B") + f" {dt.day} at " + dt.strftime("%I:%M %p").lstrip("0")
 
 mcp = FastMCP(
     name="Salon Booking Tools",
@@ -26,7 +32,10 @@ def check_availability(service: str, datetime_str: str) -> dict:
         service: Salon service — haircut, hair colour, blowout, facial, or bridal package
         datetime_str: ISO 8601 datetime string e.g. 2024-06-15T14:00:00
     """
-    return db.check_availability(service, datetime_str)
+    result = db.check_availability(service, datetime_str)
+    if not result.get("available") and result.get("alternatives"):
+        result["alternatives_display"] = [_fmt_slot(s) for s in result["alternatives"]]
+    return result
 
 
 @mcp.tool()
@@ -148,6 +157,35 @@ def cancel_appointment(booking_id_or_email: str) -> dict:
 def list_appointments() -> list:
     """Return all appointments ordered by datetime descending. For salon owner use only."""
     return db.get_all_appointments()
+
+
+@mcp.tool()
+def get_closed_dates() -> list:
+    """Return all salon closed dates."""
+    return db.get_closed_dates()
+
+
+@mcp.tool()
+def add_closed_date(date: str, reason: str = "") -> dict:
+    """Mark a specific date as closed (e.g. Eid, Independence Day).
+
+    Args:
+        date: Date in YYYY-MM-DD format
+        reason: Human-readable reason e.g. 'Eid ul Adha'
+    """
+    db.add_closed_date(date, reason)
+    return {"success": True, "date": date, "reason": reason}
+
+
+@mcp.tool()
+def remove_closed_date(date: str) -> dict:
+    """Remove a closed date, making it bookable again.
+
+    Args:
+        date: Date in YYYY-MM-DD format
+    """
+    db.remove_closed_date(date)
+    return {"success": True, "date": date}
 
 
 if __name__ == "__main__":
