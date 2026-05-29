@@ -68,29 +68,39 @@ Every tool in this stack is either free or near-zero cost at PoV scale. Nothing 
 appointment-booking-agent/
 ├── apps/
 │   ├── backend/                  # FastAPI agent server — Railway
-│   │   ├── main.py               # /chat (SSE), /bookings, /health
+│   │   ├── main.py               # /chat, /bookings, /closures, /health + cancel/reschedule
 │   │   ├── agent.py              # Agents SDK setup, Gemini model (gemini-3.1-flash-lite)
 │   │   ├── Dockerfile
 │   │   ├── railway.toml
 │   │   └── pyproject.toml
 │   │
 │   ├── mcp-server/               # FastMCP tool server — Railway
-│   │   ├── server.py             # 5 MCP tools over SSE
-│   │   ├── database.py           # PostgreSQL CRUD via psycopg2
+│   │   ├── server.py             # 8 MCP tools over SSE
+│   │   ├── database.py           # PostgreSQL CRUD + salon_hours + closed_dates
 │   │   ├── email_service.py      # Resend integration
 │   │   ├── Dockerfile
 │   │   ├── railway.toml
 │   │   └── pyproject.toml
 │   │
-│   └── frontend/                 # Next.js chat UI — Vercel
+│   └── frontend/                 # Next.js chat UI + owner dashboard — Vercel
 │       ├── app/
 │       │   ├── page.tsx          # Chat UI
 │       │   ├── layout.tsx
-│       │   ├── globals.css
-│       │   └── api/chat/route.ts # Proxy to FastAPI (keeps backend URL server-side)
-│       └── components/
-│           ├── ChatWidget.tsx    # SSE streaming chat
-│           └── BookingCard.tsx   # Confirmed booking card
+│       │   ├── globals.css       # Design tokens, animations, mobile media queries
+│       │   ├── dashboard/
+│       │   │   └── page.tsx      # Owner dashboard (All/Today/Closures tabs)
+│       │   └── api/
+│       │       ├── chat/route.ts
+│       │       ├── bookings/route.ts
+│       │       ├── bookings/[id]/cancel/route.ts
+│       │       ├── bookings/[id]/reschedule/route.ts
+│       │       ├── closures/route.ts
+│       │       └── closures/[date]/route.ts
+│       ├── components/
+│       │   ├── ChatWidget.tsx    # SSE streaming chat, mobile responsive
+│       │   └── BookingCard.tsx   # Confirmed booking card
+│       └── hooks/
+│           └── useIsMobile.ts    # matchMedia hook (768px breakpoint)
 │
 ├── docker-compose.yml            # Local dev (all three services)
 ├── .github/workflows/docker.yml  # CI: build + push to GHCR
@@ -153,7 +163,7 @@ Four tools cover the entire booking lifecycle. Each tool is a Python function th
 
 **check_availability**
 Input: service name, ISO 8601 datetime string.
-Action: queries the PostgreSQL appointments table for conflicting bookings within the service duration window using interval arithmetic. Returns available or unavailable with the next three open slots if unavailable.
+Action: first checks `salon_hours` and `closed_dates` tables — rejects slots outside working hours, on Sundays, or on specific closed dates. Then queries appointments for conflicts using interval arithmetic. Returns `available`, `reason` (if blocked), `alternatives` (ISO list), and `alternatives_display` (human-readable strings like "Monday, June 9 at 2:00 PM").
 
 **book_appointment**
 Input: client name, client email, service, ISO 8601 datetime string.
@@ -171,20 +181,47 @@ Action: sets the appointment status to cancelled in PostgreSQL and sends a cance
 Input: none.
 Action: returns all appointments ordered by `appt_datetime` descending. Called by the `/bookings` owner endpoint in the FastAPI agent server.
 
+**get_closed_dates**
+Input: none.
+Action: returns all entries from the `closed_dates` table — specific holidays and closure dates set by the salon owner.
+
+**add_closed_date**
+Input: date (YYYY-MM-DD), reason (optional string).
+Action: inserts a row into `closed_dates`, blocking that date from bookings immediately.
+
+**remove_closed_date**
+Input: date (YYYY-MM-DD).
+Action: deletes the row from `closed_dates`, making that date bookable again.
+
 ---
 
 ## FastAPI Routes
 
-Three routes. Nothing more is needed for the PoV.
-
 **POST /chat**
-Receives the client message and conversation history as a JSON array. Passes it to the OpenAI Agent SDK runner. Streams the agent's response back as server-sent events so the Next.js frontend can render tokens as they arrive. This is the only route the frontend calls.
+Receives the client message and conversation history as a JSON array. Passes it to the OpenAI Agent SDK runner. Streams the agent's response back as server-sent events so the Next.js frontend can render tokens as they arrive.
 
-**GET /bookings**
-Protected by a simple API key header check (`X-API-Key: BOOKING_API_KEY`). Calls the `list_appointments` MCP tool and returns all appointments from PostgreSQL as JSON, ordered by datetime descending. This is the salon owner's dashboard — no UI needed for PoV, the owner can use Insomnia or a simple table page.
+**GET /bookings** *(protected)*
+Calls the `list_appointments` MCP tool and returns all appointments as JSON ordered by datetime descending.
+
+**POST /bookings/{booking_id}/cancel** *(protected)*
+Calls the `cancel_appointment` MCP tool — marks the booking cancelled and fires the cancellation email.
+
+**POST /bookings/{booking_id}/reschedule** *(protected)*
+Body: `{"new_datetime": "ISO string"}`. Calls the `reschedule_appointment` MCP tool — updates the slot and fires reschedule emails.
+
+**GET /closures** *(protected)*
+Returns all rows from `closed_dates`.
+
+**POST /closures** *(protected)*
+Body: `{"date": "YYYY-MM-DD", "reason": "..."}`. Adds a closed date.
+
+**DELETE /closures/{date}** *(protected)*
+Removes a closed date, making it bookable again.
 
 **GET /health**
-Returns `{"status": "ok"}`. Used by Railway as the health check endpoint to confirm the process is running.
+Returns `{"status": "ok"}`. Used by Railway as the health check endpoint.
+
+All protected routes require `X-API-Key: BOOKING_API_KEY` header.
 
 ---
 
@@ -202,7 +239,7 @@ This means the entire email infrastructure is one Python file with two function 
 
 ## PostgreSQL Schema (Neon)
 
-One table. Every field needed for the PoV and nothing extra. Column `appt_datetime` is named deliberately to avoid collision with the PostgreSQL reserved word `datetime`.
+Three tables, all created and seeded by `init_db()` on MCP server startup.
 
 ```sql
 CREATE TABLE IF NOT EXISTS appointments (
@@ -214,27 +251,56 @@ CREATE TABLE IF NOT EXISTS appointments (
   duration_minutes  INTEGER NOT NULL,     -- derived from service at booking time
   status            TEXT DEFAULT 'confirmed', -- confirmed | rescheduled | cancelled
   reminder_email_id TEXT,                 -- Resend email ID for cancellation
-  created_at        TEXT DEFAULT CURRENT_TIMESTAMP
+  created_at        TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Seeded on first run: Mon–Sat open 10:00–19:00, Sunday closed
+CREATE TABLE IF NOT EXISTS salon_hours (
+  day_of_week  INTEGER PRIMARY KEY,  -- 0=Mon … 6=Sun
+  open_time    TEXT NOT NULL DEFAULT '10:00',
+  close_time   TEXT NOT NULL DEFAULT '19:00',
+  is_open      BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Specific holiday/closure dates managed via dashboard
+CREATE TABLE IF NOT EXISTS closed_dates (
+  date    TEXT PRIMARY KEY,  -- YYYY-MM-DD
+  reason  TEXT DEFAULT ''
 );
 ```
 
-All SELECT queries alias `appt_datetime AS datetime` to preserve API compatibility.
+All SELECT queries on `appointments` alias `appt_datetime AS datetime` to preserve API compatibility. `check_availability` reads `salon_hours` and `closed_dates` before checking booking conflicts.
 
 ---
 
 ## Next.js Frontend
 
-One page. One component. One API route.
+**app/page.tsx** — chat UI. Renders `ChatWidget` which handles the full booking conversation.
 
-**app/page.tsx** renders the chat UI. A `useState` array holds the message thread. An input field and send button submit messages. Responses stream in via the EventSource API connected to the Next.js proxy route. When the agent response contains a booking confirmation signal, a `BookingCard` component renders below the message with the booking details.
+**app/dashboard/page.tsx** — owner dashboard at `/dashboard`. Protected by API key stored in `localStorage`. Three tabs:
+- **All Bookings** — table with inline cancel and reschedule actions, 4-stat header, CSV export
+- **Today** — today's appointments sorted by time
+- **Closed Dates** — add/remove specific holiday dates with reason labels
 
-**app/api/chat/route.ts** is a Next.js route handler that proxies the client message and conversation history to the FastAPI `/chat` endpoint and streams the response back to the browser. This keeps the FastAPI URL server-side and prevents it from being exposed in the browser.
+**app/api/chat/route.ts** — proxies chat messages to FastAPI, streams SSE back to browser.
 
-**components/ChatWidget.tsx** handles the message list, input field, send button, and streaming token rendering.
+**app/api/bookings/route.ts** — proxies `GET /bookings` to FastAPI.
 
-**components/BookingCard.tsx** displays the confirmed booking details — name, service, date, time, booking ID — in a clean card format when the agent confirms a booking.
+**app/api/bookings/[id]/cancel/route.ts** — proxies cancel action.
 
-The frontend has no auth, no routing, no state management library, no component library beyond what is needed. It is intentionally minimal.
+**app/api/bookings/[id]/reschedule/route.ts** — proxies reschedule action.
+
+**app/api/closures/route.ts** — proxies `GET` and `POST /closures`.
+
+**app/api/closures/[date]/route.ts** — proxies `DELETE /closures/{date}`.
+
+**components/ChatWidget.tsx** — SSE streaming chat, mobile responsive via `useIsMobile` hook.
+
+**components/BookingCard.tsx** — confirmed booking card rendered inline in chat.
+
+**hooks/useIsMobile.ts** — `matchMedia` hook at 768px breakpoint used by ChatWidget and dashboard.
+
+The backend URL never appears in client code — all proxied through Next.js API routes.
 
 ---
 
@@ -374,16 +440,19 @@ All commands below assume you are at the monorepo root unless stated otherwise.
 
 Once a salon owner is paying, layer these in one at a time. Do not build any of this before the PoV is sold.
 
-| Feature | Tech to add |
-|---|---|
-| WhatsApp booking channel | Twilio WhatsApp API webhook |
-| Multi-salon support | Postgres on Railway + salon tenant ID |
-| Reliable reminder queue | Railway Redis + arq worker |
-| Salon owner dashboard UI | Next.js dashboard page + auth |
-| Staff scheduling and calendar sync | Google Calendar API |
-| Payments and deposits | Stripe Payment Links |
-| SMS reminders | Twilio SMS |
-| MCP server for advanced tooling | OpenAI Agent SDK MCP host |
+| Feature | Status | Tech to add |
+|---|---|---|
+| Owner dashboard UI | ✅ Built | `/dashboard` — All/Today/Closures tabs |
+| Cancel/reschedule from dashboard | ✅ Built | FastAPI endpoints + MCP tools |
+| Closed dates management | ✅ Built | `closed_dates` DB table + dashboard tab |
+| Mobile responsive UI | ✅ Built | `useIsMobile` hook + CSS media queries |
+| WhatsApp notifications | Not built | CallMeBot (free) or Twilio |
+| WhatsApp booking channel | Not built | Twilio WhatsApp API webhook |
+| Multi-salon support | Not built | Postgres tenant ID per salon |
+| Reliable reminder queue | Not built | Railway Redis + arq worker |
+| Staff scheduling + calendar sync | Not built | Google Calendar API |
+| Payments and deposits | Not built | Stripe Payment Links |
+| SMS reminders | Not built | Twilio SMS |
 
 ---
 

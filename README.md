@@ -35,7 +35,7 @@ Next.js Frontend  ──proxy──▶  FastAPI Agent Server
 2. Next.js proxies it to the FastAPI agent server (keeps backend URL server-side)
 3. FastAPI passes the conversation to the OpenAI Agents SDK running Gemini
 4. The agent calls tools hosted on a FastMCP server over SSE when it needs to act
-5. Tools read/write SQLite and send emails via Resend
+5. Tools read/write Neon PostgreSQL and send emails via Resend
 6. Responses stream back token-by-token as SSE events
 7. A `BookingCard` renders in the UI when a booking is confirmed
 
@@ -65,29 +65,38 @@ Next.js Frontend  ──proxy──▶  FastAPI Agent Server
 appointment-booking-agent/
 ├── apps/
 │   ├── backend/                  # FastAPI agent server → Railway
-│   │   ├── main.py               # /chat (SSE), /bookings, /health
+│   │   ├── main.py               # /chat, /bookings, /closures, /health + cancel/reschedule
 │   │   ├── agent.py              # Agents SDK setup, Gemini model
 │   │   ├── Dockerfile
 │   │   ├── railway.toml
 │   │   └── pyproject.toml
 │   │
 │   ├── mcp-server/               # FastMCP tool server → Railway
-│   │   ├── server.py             # 5 MCP tools over SSE
-│   │   ├── database.py           # SQLite CRUD
+│   │   ├── server.py             # 8 MCP tools over SSE
+│   │   ├── database.py           # PostgreSQL CRUD + salon_hours + closed_dates
 │   │   ├── email_service.py      # Resend integration
 │   │   ├── Dockerfile
 │   │   ├── railway.toml
 │   │   └── pyproject.toml
 │   │
-│   └── frontend/                 # Next.js chat UI → Vercel
+│   └── frontend/                 # Next.js chat UI + owner dashboard → Vercel
 │       ├── app/
 │       │   ├── page.tsx
 │       │   ├── layout.tsx
 │       │   ├── globals.css
-│       │   └── api/chat/route.ts # Proxy to FastAPI
-│       └── components/
-│           ├── ChatWidget.tsx    # SSE streaming chat
-│           └── BookingCard.tsx   # Confirmed booking card
+│       │   ├── dashboard/page.tsx          # Owner dashboard (All/Today/Closures)
+│       │   └── api/
+│       │       ├── chat/route.ts
+│       │       ├── bookings/route.ts
+│       │       ├── bookings/[id]/cancel/route.ts
+│       │       ├── bookings/[id]/reschedule/route.ts
+│       │       ├── closures/route.ts
+│       │       └── closures/[date]/route.ts
+│       ├── components/
+│       │   ├── ChatWidget.tsx    # SSE streaming chat, mobile responsive
+│       │   └── BookingCard.tsx   # Confirmed booking card
+│       └── hooks/
+│           └── useIsMobile.ts   # 768px matchMedia hook
 │
 ├── docker-compose.yml            # Local dev (all three services)
 ├── .github/workflows/docker.yml  # CI: build + push to GHCR
@@ -102,11 +111,14 @@ The agent (Zara) handles four intents via MCP tools:
 
 | Tool | What it does |
 |---|---|
-| `check_availability` | Queries Neon PostgreSQL for conflicts using interval arithmetic; returns 3 alternatives if slot taken |
-| `book_appointment` | Writes appointment row to Neon, fires confirmation email, schedules 24h reminder via Resend |
-| `reschedule_appointment` | Cancels old reminder, updates row, sends new emails |
+| `check_availability` | Checks `salon_hours` + `closed_dates` first, then queries Neon for booking conflicts; returns alternatives with friendly display strings |
+| `book_appointment` | Writes appointment to Neon, fires confirmation email, schedules 24h reminder via Resend |
+| `reschedule_appointment` | Cancels old reminder, updates slot, sends reschedule email |
 | `cancel_appointment` | Marks cancelled, cancels reminder, sends cancellation email |
-| `list_appointments` | Returns all appointments for the `/bookings` owner endpoint |
+| `list_appointments` | Returns all appointments for the `/bookings` endpoint |
+| `get_closed_dates` | Returns all holiday/closure dates |
+| `add_closed_date` | Adds a specific closure date (e.g. Eid) — blocks it from bookings immediately |
+| `remove_closed_date` | Removes a closure date, making it bookable again |
 
 ---
 
@@ -223,7 +235,22 @@ data: [DONE]
 ```
 
 ### `GET /bookings`
-Returns all appointments. Requires `X-API-Key` header matching `BOOKING_API_KEY`.
+Returns all appointments. Requires `X-API-Key` header.
+
+### `POST /bookings/{id}/cancel`
+Cancels a booking and fires a cancellation email. Requires `X-API-Key`.
+
+### `POST /bookings/{id}/reschedule`
+Body: `{"new_datetime": "2026-07-10T14:00:00"}`. Reschedules and fires email. Requires `X-API-Key`.
+
+### `GET /closures`
+Returns all closed dates. Requires `X-API-Key`.
+
+### `POST /closures`
+Body: `{"date": "2026-06-28", "reason": "Eid ul Adha"}`. Adds a closed date. Requires `X-API-Key`.
+
+### `DELETE /closures/{date}`
+Removes a closed date. Requires `X-API-Key`.
 
 ### `GET /health`
 Returns `{"status": "ok"}`. Used by Railway health checks.
@@ -271,19 +298,31 @@ Images are tagged with both `latest` and the commit SHA.
 
 ## PostgreSQL Schema (Neon)
 
-Column `appt_datetime` is named to avoid collision with the PostgreSQL reserved word `datetime`. All SELECT queries alias it as `datetime` for API compatibility.
+Three tables created by `init_db()` on MCP server startup. `salon_hours` is seeded once with Mon–Sat open 10:00–19:00 and Sunday closed.
 
 ```sql
 CREATE TABLE IF NOT EXISTS appointments (
-  id                TEXT PRIMARY KEY,     -- 8-char uppercase UUID
+  id                TEXT PRIMARY KEY,
   client_name       TEXT NOT NULL,
   client_email      TEXT NOT NULL,
   service           TEXT NOT NULL,
-  appt_datetime     TEXT NOT NULL,        -- ISO 8601
+  appt_datetime     TEXT NOT NULL,        -- ISO 8601 (aliased AS datetime in SELECTs)
   duration_minutes  INTEGER NOT NULL,
-  status            TEXT DEFAULT 'confirmed', -- confirmed | rescheduled | cancelled
-  reminder_email_id TEXT,                 -- Resend email ID for cancellation
-  created_at        TEXT DEFAULT CURRENT_TIMESTAMP
+  status            TEXT DEFAULT 'confirmed',
+  reminder_email_id TEXT,
+  created_at        TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS salon_hours (
+  day_of_week  INTEGER PRIMARY KEY,       -- 0=Mon … 6=Sun
+  open_time    TEXT NOT NULL DEFAULT '10:00',
+  close_time   TEXT NOT NULL DEFAULT '19:00',
+  is_open      BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE IF NOT EXISTS closed_dates (
+  date    TEXT PRIMARY KEY,               -- YYYY-MM-DD
+  reason  TEXT DEFAULT ''
 );
 ```
 
