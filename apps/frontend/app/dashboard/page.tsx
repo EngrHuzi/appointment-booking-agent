@@ -119,7 +119,7 @@ function LoginScreen({ onLogin }: { onLogin: (key: string) => void }) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: '24px' }}>
+    <div style={{ height: '100vh', overflowY: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: '24px' }}>
       <div style={{ width: '100%', maxWidth: '380px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '20px', boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}>
         <div style={{ height: '2px', background: 'linear-gradient(90deg,transparent,#C4923E,#EAD48A,#C4923E,transparent)' }} />
         <div style={{ padding: '36px 32px 32px' }}>
@@ -208,7 +208,8 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
       )}
 
       {/* Table */}
-      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden' }}>
+      <div style={{ overflowX: 'auto', borderRadius: '14px', border: '1px solid var(--border)' }}>
+      <div style={{ background: 'var(--bg-surface)', borderRadius: '14px', overflow: 'hidden', minWidth: '860px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 110px 170px 120px 160px', padding: '0 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-raised)' }}>
           {['Booking ID', 'Client', 'Service', 'Date & Time', 'Status', 'Actions'].map(col => (
             <div key={col} style={{ padding: '11px 8px', color: 'var(--cream-muted)', fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase' }}>{col}</div>
@@ -278,6 +279,7 @@ function AllBookingsTab({ bookings, apiKey, onRefresh }: { bookings: Booking[]; 
             )}
           </div>
         ))}
+      </div>
       </div>
 
       <p style={{ color: 'var(--cream-dim)', fontSize: '11px', textAlign: 'center', marginTop: '20px' }}>
@@ -416,7 +418,8 @@ function ClosuresTab({ apiKey, refreshKey }: { apiKey: string; refreshKey: numbe
       </div>
 
       {/* List */}
-      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden' }}>
+      <div style={{ overflowX: 'auto', borderRadius: '14px', border: '1px solid var(--border)' }}>
+      <div style={{ background: 'var(--bg-surface)', borderRadius: '14px', overflow: 'hidden', minWidth: '500px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr auto', padding: '0 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-raised)' }}>
           {['Date', 'Reason', ''].map((col, i) => (
             <div key={i} style={{ padding: '11px 8px', color: 'var(--cream-muted)', fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase' }}>{col}</div>
@@ -451,6 +454,7 @@ function ClosuresTab({ apiKey, refreshKey }: { apiKey: string; refreshKey: numbe
           </div>
         ))}
       </div>
+      </div>
     </div>
   )
 }
@@ -482,7 +486,7 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
   ]
 
   return (
-    <div style={{ minHeight: '100vh', overflowY: 'auto', background: 'var(--bg-base)', fontFamily: 'var(--font-dm-sans)' }}>
+    <div style={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden', background: 'var(--bg-base)', fontFamily: 'var(--font-dm-sans)' }}>
       {/* Header */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'rgba(11,7,5,0.92)', backdropFilter: 'blur(12px)', borderBottom: '1px solid var(--border)' }}>
         <div style={{ maxWidth: '1140px', margin: '0 auto', padding: '0 24px' }}>
