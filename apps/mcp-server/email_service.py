@@ -42,8 +42,13 @@ def send_reminder(
     client_name: str, client_email: str, service: str, dt_iso: str, booking_id: str
 ) -> str:
     appt_dt = datetime.fromisoformat(dt_iso)
-    # Schedule 24 h before; Resend expects UTC ISO 8601
     reminder_at = (appt_dt - timedelta(hours=24)).replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+
+    # Skip the scheduled reminder if it would fire in the past or within 5 minutes
+    if reminder_at <= now + timedelta(minutes=5):
+        return ""
+
     scheduled_at = reminder_at.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
     resp = resend.Emails.send({

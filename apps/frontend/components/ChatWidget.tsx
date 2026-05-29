@@ -202,7 +202,7 @@ export default function ChatWidget() {
             fontFamily: 'var(--font-cormorant)', fontSize: '15px',
             color: 'var(--gold-lt)', letterSpacing: '0.12em',
             fontStyle: 'italic', opacity: 0.75, lineHeight: 1,
-          }}>The Salon</p>
+          }}>Huzi Salon</p>
           <p style={{
             color: 'var(--cream-ghost)', fontSize: '9px',
             letterSpacing: '0.18em', textTransform: 'uppercase',

@@ -27,8 +27,8 @@ Next.js Frontend  ──proxy──▶  FastAPI Agent Server
                               MCP Server (FastMCP)
                                      │
                               ┌──────┴──────┐
-                              SQLite      Resend
-                           (appointments)  (emails)
+                           Neon DB       Resend
+                         (PostgreSQL)   (emails)
 ```
 
 1. Client sends a message from the Next.js chat UI
@@ -48,7 +48,7 @@ Next.js Frontend  ──proxy──▶  FastAPI Agent Server
 | AI Agent | OpenAI Agents SDK 0.17.4 + Gemini via Google OpenAI-compatible endpoint |
 | Backend | FastAPI + uvicorn |
 | Tools | FastMCP 3.3.1 over SSE transport |
-| Database | SQLite (Railway persistent volume) |
+| Database | PostgreSQL on Neon (serverless, free tier) |
 | Email | Resend (confirmation + 24-hour scheduled reminder) |
 | Frontend | Next.js 16 App Router, TypeScript |
 | Styling | Tailwind CSS v4 + CSS variables, Cormorant Garamond + DM Sans |
@@ -102,8 +102,8 @@ The agent (Zara) handles four intents via MCP tools:
 
 | Tool | What it does |
 |---|---|
-| `check_availability` | Queries SQLite for conflicts; returns 3 alternatives if slot taken |
-| `book_appointment` | Writes appointment row, fires confirmation email, schedules 24h reminder via Resend |
+| `check_availability` | Queries Neon PostgreSQL for conflicts using interval arithmetic; returns 3 alternatives if slot taken |
+| `book_appointment` | Writes appointment row to Neon, fires confirmation email, schedules 24h reminder via Resend |
 | `reschedule_appointment` | Cancels old reminder, updates row, sends new emails |
 | `cancel_appointment` | Marks cancelled, cancels reminder, sends cancellation email |
 | `list_appointments` | Returns all appointments for the `/bookings` owner endpoint |
@@ -175,8 +175,8 @@ pnpm dev
 GOOGLE_API_KEY=your_google_gemini_api_key
 GEMINI_MODEL=gemini-3.1-flash-lite
 OPENAI_API_KEY=your_openai_key_for_tracing_optional
-MCP_SERVER_URL=http://localhost:8001
-SALON_NAME=Zara Salon
+MCP_SERVER_URL=http://localhost:8001/sse
+SALON_NAME=Huzi Salon
 SALON_CITY=Lahore
 SALON_EMAIL=bookings@yourdomain.com
 BOOKING_API_KEY=your_secret_key_here
@@ -186,11 +186,10 @@ BOOKING_API_KEY=your_secret_key_here
 
 ```env
 RESEND_API_KEY=your_resend_api_key
-SALON_NAME=Zara Salon
+DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+SALON_NAME=Huzi Salon
 SALON_CITY=Lahore
-SALON_EMAIL=bookings@yourdomain.com
-DATABASE_PATH=./local.db
-MCP_PORT=8001
+SALON_EMAIL=onboarding@resend.dev
 ```
 
 ### `apps/frontend/.env.local`
@@ -237,15 +236,14 @@ Returns `{"status": "ok"}`. Used by Railway health checks.
 
 1. New project → deploy from GitHub
 2. Set **Root Directory** to `apps/mcp-server`
-3. Add a **Volume** mounted at `/data`
-4. Set environment variables (see above, use `DATABASE_PATH=/data/salon.db`)
-5. Copy the generated service URL (e.g. `https://mcp-xxx.up.railway.app`)
+3. Set environment variables: `RESEND_API_KEY`, `DATABASE_URL` (Neon connection string), `SALON_NAME`, `SALON_CITY`, `SALON_EMAIL`
+4. Copy the generated service URL (e.g. `https://mcp-xxx.up.railway.app`)
 
 ### 2 — Deploy agent server to Railway
 
 1. New service in the same project → GitHub, root `apps/backend`
-2. Set `MCP_SERVER_URL` to the MCP server URL from step 1
-3. Set all other environment variables
+2. Set `MCP_SERVER_URL` to `https://mcp-xxx.up.railway.app/sse` (URL from step 1 + `/sse`)
+3. Set `GOOGLE_API_KEY`, `GEMINI_MODEL=gemini-3.1-flash-lite`, `BOOKING_API_KEY`, `SALON_NAME`, `SALON_CITY`, `SALON_EMAIL`
 
 ### 3 — Deploy frontend to Vercel
 
@@ -271,15 +269,17 @@ Images are tagged with both `latest` and the commit SHA.
 
 ---
 
-## SQLite Schema
+## PostgreSQL Schema (Neon)
+
+Column `appt_datetime` is named to avoid collision with the PostgreSQL reserved word `datetime`. All SELECT queries alias it as `datetime` for API compatibility.
 
 ```sql
-CREATE TABLE appointments (
+CREATE TABLE IF NOT EXISTS appointments (
   id                TEXT PRIMARY KEY,     -- 8-char uppercase UUID
   client_name       TEXT NOT NULL,
   client_email      TEXT NOT NULL,
   service           TEXT NOT NULL,
-  datetime          TEXT NOT NULL,        -- ISO 8601
+  appt_datetime     TEXT NOT NULL,        -- ISO 8601
   duration_minutes  INTEGER NOT NULL,
   status            TEXT DEFAULT 'confirmed', -- confirmed | rescheduled | cancelled
   reminder_email_id TEXT,                 -- Resend email ID for cancellation
@@ -293,8 +293,10 @@ CREATE TABLE appointments (
 
 | Service | Cost |
 |---|---|
-| Gemini API (free tier) | ~$0 for dev/demo |
+| Gemini API (gemini-3.1-flash-lite, free tier) | ~$0 for dev/demo |
+| OpenAI Agents SDK | Free (open-source) |
 | Resend | Free — 3,000 emails/month |
+| Neon PostgreSQL | Free — 0.5 GB storage |
 | Railway | Free tier sufficient |
 | Vercel | Free tier sufficient |
 | **Total (~200 bookings/month)** | **Under $5** |

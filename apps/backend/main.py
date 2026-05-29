@@ -27,9 +27,10 @@ async def lifespan(app: FastAPI):
     from agents.mcp import MCPServerSse, MCPServerSseParams
 
     mcp = MCPServerSse(
-        params=MCPServerSseParams(url=MCP_SERVER_URL),
+        params=MCPServerSseParams(url=MCP_SERVER_URL, timeout=30.0, sse_read_timeout=30.0),
         name="SalonTools",
         cache_tools_list=True,
+        client_session_timeout_seconds=30,
     )
     await mcp.__aenter__()
     app.state.mcp = mcp
@@ -127,19 +128,35 @@ async def chat(request: ChatRequest, req: Request):
                     if type(data).__name__ == "ResponseTextDeltaEvent" and hasattr(data, "delta"):
                         yield f"data: {json.dumps({'type': 'delta', 'content': data.delta})}\n\n"
 
-                elif event.type == "run_item_stream_event" and event.name == "item_done":
-                    item = event.item
-                    if hasattr(item, "output") and isinstance(item.output, str):
-                        try:
-                            output = json.loads(item.output)
-                            if (
-                                isinstance(output, dict)
-                                and output.get("tool") == "book_appointment"
-                                and output.get("success")
-                            ):
-                                booking_event = output
-                        except (json.JSONDecodeError, TypeError):
-                            pass
+            # After stream ends, scan all new items for a book_appointment result.
+            # MCP tool outputs come as ToolCallOutputItem where .output is a dict
+            # {'type': 'text', 'text': '<json>'}, a plain str, or a list of content items.
+            for item in getattr(result, "new_items", []):
+                raw = getattr(item, "output", None)
+                if raw is None:
+                    continue
+                if isinstance(raw, str):
+                    candidates = [raw]
+                elif isinstance(raw, dict):
+                    candidates = [raw.get("text", "")]
+                elif isinstance(raw, list):
+                    candidates = [
+                        (c.get("text") or getattr(c, "text", ""))
+                        for c in raw
+                    ]
+                else:
+                    candidates = []
+                for candidate in candidates:
+                    try:
+                        parsed = json.loads(candidate)
+                        if (
+                            isinstance(parsed, dict)
+                            and parsed.get("tool") == "book_appointment"
+                            and parsed.get("success")
+                        ):
+                            booking_event = parsed
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
@@ -164,9 +181,9 @@ async def chat(request: ChatRequest, req: Request):
 async def get_bookings():
     from fastmcp import Client
 
-    async with Client(f"{MCP_SERVER_URL}/sse") as client:
+    async with Client(MCP_SERVER_URL) as client:
         result = await client.call_tool("list_appointments", {})
-        return json.loads(result[0].text)
+        return json.loads(result.content[0].text)
 
 
 @app.get("/health", summary="Health check for Railway")

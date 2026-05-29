@@ -2,12 +2,13 @@ import os
 import uuid
 
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastmcp import FastMCP
 
 import database as db
 import email_service as email
-
-load_dotenv()
 
 db.init_db()
 

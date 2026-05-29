@@ -48,7 +48,7 @@ Every tool in this stack is either free or near-zero cost at PoV scale. Nothing 
 ### Backend
 **FastAPI** (Python) is the single backend process deployed on Railway. It exposes three routes: the agent chat endpoint, the bookings dashboard endpoint, and a health check. All business logic — availability checking, appointment writes, email triggers — lives in FastAPI service functions called by the agent tools. FastAPI also serves the confirmation email trigger and the Resend scheduled reminder on every new booking.
 
-**SQLite** is the database for the PoV. No setup, no connection strings, no managed service. A single `.db` file on the Railway volume stores all appointments. The schema is one table. This is intentional — the goal is a working demo, not a scalable database. Postgres with a tenant ID replaces this after the PoV is sold.
+**PostgreSQL on Neon** is the database for the PoV. Neon provides a serverless Postgres instance with a free tier sufficient for demo scale. The `DATABASE_URL` connection string is set as an environment variable. No Railway volumes or local files required. The schema is one table.
 
 **Resend** handles all transactional email. Two emails per booking: an immediate confirmation and a scheduled 24-hour reminder using Resend's `scheduled_at` parameter. This removes the need for any background job queue, asyncio tasks, Redis, or Celery entirely. Free tier covers 3,000 emails per month — more than sufficient for a PoV with one salon.
 
@@ -56,7 +56,7 @@ Every tool in this stack is either free or near-zero cost at PoV scale. Nothing 
 **Next.js** (App Router, TypeScript) is the chat UI deployed on Vercel. A single chat page with a streaming message component talks to the FastAPI backend via a `/api/chat` proxy route inside Next.js. The UI shows a booking confirmation card when the agent confirms an appointment. Nothing else. No auth, no dashboard, no multi-page app. One page, one purpose.
 
 ### Infrastructure
-**Railway** hosts the FastAPI backend. Deploy from GitHub with a `railway.toml` config. Railway manages the SQLite file volume, environment variables, and the always-on process. The free tier is sufficient for a PoV with one salon.
+**Railway** hosts both the FastAPI agent server and the FastMCP tool server. Deploy each service from GitHub with a `railway.toml` config. Railway manages environment variables and the always-on process. The free tier is sufficient for a PoV with one salon.
 
 **Vercel** hosts the Next.js frontend. Connect the GitHub repo, set the `NEXT_PUBLIC_API_URL` environment variable pointing to the Railway backend, and it deploys automatically on every push. Free tier is sufficient.
 
@@ -65,24 +65,35 @@ Every tool in this stack is either free or near-zero cost at PoV scale. Nothing 
 ## Monorepo Structure
 
 ```
-salon-booking-agent/
+appointment-booking-agent/
 ├── apps/
-│   ├── backend/                  # FastAPI — Railway
-│   │   ├── main.py
-│   │   ├── agent.py              # OpenAI Agent SDK setup, tools
-│   │   ├── database.py           # SQLite connection, CRUD
+│   ├── backend/                  # FastAPI agent server — Railway
+│   │   ├── main.py               # /chat (SSE), /bookings, /health
+│   │   ├── agent.py              # Agents SDK setup, Gemini model (gemini-3.1-flash-lite)
+│   │   ├── Dockerfile
+│   │   ├── railway.toml
+│   │   └── pyproject.toml
+│   │
+│   ├── mcp-server/               # FastMCP tool server — Railway
+│   │   ├── server.py             # 5 MCP tools over SSE
+│   │   ├── database.py           # PostgreSQL CRUD via psycopg2
 │   │   ├── email_service.py      # Resend integration
-│   │   ├── requirements.txt
-│   │   └── railway.toml
-│   └── frontend/                 # Next.js — Vercel
+│   │   ├── Dockerfile
+│   │   ├── railway.toml
+│   │   └── pyproject.toml
+│   │
+│   └── frontend/                 # Next.js chat UI — Vercel
 │       ├── app/
 │       │   ├── page.tsx          # Chat UI
-│       │   └── api/chat/route.ts # Proxy to FastAPI
-│       ├── components/
-│       │   ├── ChatWidget.tsx
-│       │   └── BookingCard.tsx
-│       ├── package.json
-│       └── next.config.ts
+│       │   ├── layout.tsx
+│       │   ├── globals.css
+│       │   └── api/chat/route.ts # Proxy to FastAPI (keeps backend URL server-side)
+│       └── components/
+│           ├── ChatWidget.tsx    # SSE streaming chat
+│           └── BookingCard.tsx   # Confirmed booking card
+│
+├── docker-compose.yml            # Local dev (all three services)
+├── .github/workflows/docker.yml  # CI: build + push to GHCR
 ├── AGENTS.md
 ├── pnpm-workspace.yaml
 └── turbo.json
@@ -142,11 +153,11 @@ Four tools cover the entire booking lifecycle. Each tool is a Python function th
 
 **check_availability**
 Input: service name, ISO 8601 datetime string.
-Action: queries the SQLite appointments table for conflicting bookings within the service duration window. Returns available or unavailable with the next three open slots if unavailable.
+Action: queries the PostgreSQL appointments table for conflicting bookings within the service duration window using interval arithmetic. Returns available or unavailable with the next three open slots if unavailable.
 
 **book_appointment**
 Input: client name, client email, service, ISO 8601 datetime string.
-Action: writes a new appointment row to SQLite with a UUID booking ID, triggers the Resend confirmation email immediately, and calls Resend's scheduled send API for the 24-hour reminder. Returns the booking ID and confirmation.
+Action: writes a new appointment row to PostgreSQL (Neon) with a UUID booking ID, triggers the Resend confirmation email immediately, and calls Resend's scheduled send API for the 24-hour reminder. Returns the booking ID and confirmation as a JSON payload the frontend detects to render `BookingCard`.
 
 **reschedule_appointment**
 Input: booking ID or client email, new ISO 8601 datetime string.
@@ -154,7 +165,11 @@ Action: checks availability at the new time, updates the appointment row status 
 
 **cancel_appointment**
 Input: booking ID or client email.
-Action: sets the appointment status to cancelled in SQLite and sends a cancellation email via Resend.
+Action: sets the appointment status to cancelled in PostgreSQL and sends a cancellation email via Resend.
+
+**list_appointments**
+Input: none.
+Action: returns all appointments ordered by `appt_datetime` descending. Called by the `/bookings` owner endpoint in the FastAPI agent server.
 
 ---
 
@@ -166,7 +181,7 @@ Three routes. Nothing more is needed for the PoV.
 Receives the client message and conversation history as a JSON array. Passes it to the OpenAI Agent SDK runner. Streams the agent's response back as server-sent events so the Next.js frontend can render tokens as they arrive. This is the only route the frontend calls.
 
 **GET /bookings**
-Protected by a simple API key header check. Returns all appointments from SQLite as JSON, ordered by datetime descending. This is the salon owner's dashboard — no UI needed for PoV, the owner can use a tool like Insomnia or a simple table page.
+Protected by a simple API key header check (`X-API-Key: BOOKING_API_KEY`). Calls the `list_appointments` MCP tool and returns all appointments from PostgreSQL as JSON, ordered by datetime descending. This is the salon owner's dashboard — no UI needed for PoV, the owner can use Insomnia or a simple table page.
 
 **GET /health**
 Returns `{"status": "ok"}`. Used by Railway as the health check endpoint to confirm the process is running.
@@ -185,22 +200,25 @@ This means the entire email infrastructure is one Python file with two function 
 
 ---
 
-## SQLite Schema
+## PostgreSQL Schema (Neon)
 
-One table. Every field needed for the PoV and nothing extra.
+One table. Every field needed for the PoV and nothing extra. Column `appt_datetime` is named deliberately to avoid collision with the PostgreSQL reserved word `datetime`.
 
-```
-appointments
-  id                TEXT PRIMARY KEY     UUID, generated at booking time
-  client_name       TEXT NOT NULL
-  client_email      TEXT NOT NULL
-  service           TEXT NOT NULL
-  datetime          TEXT NOT NULL        ISO 8601 format
-  duration_minutes  INTEGER NOT NULL     Derived from service at booking time
-  status            TEXT DEFAULT confirmed   confirmed | rescheduled | cancelled
-  reminder_email_id TEXT                 Resend email ID for the scheduled reminder
+```sql
+CREATE TABLE IF NOT EXISTS appointments (
+  id                TEXT PRIMARY KEY,     -- 8-char uppercase UUID
+  client_name       TEXT NOT NULL,
+  client_email      TEXT NOT NULL,
+  service           TEXT NOT NULL,
+  appt_datetime     TEXT NOT NULL,        -- ISO 8601 format
+  duration_minutes  INTEGER NOT NULL,     -- derived from service at booking time
+  status            TEXT DEFAULT 'confirmed', -- confirmed | rescheduled | cancelled
+  reminder_email_id TEXT,                 -- Resend email ID for cancellation
   created_at        TEXT DEFAULT CURRENT_TIMESTAMP
+);
 ```
+
+All SELECT queries alias `appt_datetime AS datetime` to preserve API compatibility.
 
 ---
 
@@ -222,26 +240,37 @@ The frontend has no auth, no routing, no state management library, no component 
 
 ## Environment Variables
 
-**Backend (Railway)**
+**`apps/backend` (Railway — agent server)**
 ```
-OPENAI_API_KEY          OpenAI API key for the Agent SDK
-RESEND_API_KEY          Resend API key
+GOOGLE_API_KEY          Google AI Studio API key (Gemini)
+GEMINI_MODEL            Model name — gemini-3.1-flash-lite
+OPENAI_API_KEY          OpenAI API key (optional, for Agents SDK tracing)
+MCP_SERVER_URL          URL of the MCP tool server (e.g. http://localhost:8001/sse)
 SALON_NAME              Name shown in agent responses and emails
 SALON_CITY              City shown in agent responses
-SALON_EMAIL             From address for emails
-BOOKING_API_KEY         Simple key for protecting the /bookings route
-DATABASE_PATH           Path to the SQLite file on the Railway volume
+SALON_EMAIL             From address for confirmation emails
+BOOKING_API_KEY         Secret key protecting the /bookings route
 ```
 
-**Frontend (Vercel)**
+**`apps/mcp-server` (Railway — tool server)**
 ```
-NEXT_PUBLIC_API_URL     Full URL of the Railway FastAPI backend
+RESEND_API_KEY          Resend API key
+DATABASE_URL            Neon PostgreSQL connection string (sslmode=require)
+SALON_NAME              Name shown in emails
+SALON_CITY              City shown in emails
+SALON_EMAIL             From address for emails
+```
+
+**`apps/frontend` (Vercel)**
+```
+NEXT_PUBLIC_API_URL     Full URL of the Railway FastAPI agent server
 ```
 
 ---
 
 ## Railway Deploy Config
 
+**Agent server (`apps/backend/railway.toml`)**
 ```
 [build]
 builder = "nixpacks"
@@ -252,7 +281,18 @@ healthcheckPath = "/health"
 restartPolicyType = "on_failure"
 ```
 
-The SQLite file is stored on a Railway persistent volume mounted at `/data`. Set `DATABASE_PATH=/data/salon.db` in environment variables.
+**MCP server (`apps/mcp-server/railway.toml`)**
+```
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python server.py"
+healthcheckPath = "/health"
+restartPolicyType = "on_failure"
+```
+
+No Railway volumes are needed — the database is Neon PostgreSQL. Set `DATABASE_URL` to the Neon connection string in each service's environment variables.
 
 ---
 
@@ -287,13 +327,15 @@ All commands below assume you are at the monorepo root unless stated otherwise.
 - Run `pnpm install --filter <project_name>` to add a package to the workspace so Vite, ESLint, and TypeScript can resolve it.
 - Use `pnpm create vite@latest <project_name> -- --template react-ts` to spin up a new React + Vite package with TypeScript checks ready.
 - Check the `name` field inside each `package.json` to confirm the right package name — skip the top-level one.
-- For the Python backend, always work inside `apps/backend/` and use the virtualenv at `apps/backend/.venv`.
-- Activate the backend virtualenv with `source apps/backend/.venv/bin/activate` before running or testing Python code.
-- The SQLite database file is at the path set in `DATABASE_PATH`. For local dev, set it to `./local.db` in a `.env` file.
+- For the Python backend and MCP server, use `uv` (not pip) for all dependency management. Run `uv sync` in each app directory.
+- Activate the backend virtualenv with `source apps/backend/.venv/bin/activate` (or `apps/mcp-server/.venv/bin/activate`) before running Python code.
+- The database is PostgreSQL on Neon. Set `DATABASE_URL` to the Neon connection string in `apps/mcp-server/.env`.
 
 ## Running locally
-- Backend: `cd apps/backend && uvicorn main:app --reload --port 8000`
-- Frontend: `cd apps/frontend && pnpm dev`
+- MCP server: `cd apps/mcp-server && uv run python server.py` (listens on port 8001)
+- Agent server: `cd apps/backend && uv run uvicorn main:app --reload --port 8000`
+- Frontend: `cd apps/frontend && pnpm dev` (listens on port 3000)
+- Set `MCP_SERVER_URL=http://localhost:8001/sse` in `apps/backend/.env` for local dev.
 - The frontend expects the backend at the URL set in `NEXT_PUBLIC_API_URL`. For local dev, set this to `http://localhost:8000` in `apps/frontend/.env.local`.
 
 ## Testing instructions
@@ -309,12 +351,14 @@ All commands below assume you are at the monorepo root unless stated otherwise.
 
 ## Agent-specific rules
 - Never modify the system prompt in `agent.py` without an explicit instruction to do so.
-- Never hardcode API keys. All secrets come from environment variables. Check `.env.example` for the full list.
-- When adding a new agent tool, define it as a `@function_tool` decorated function in `agent.py` and register it in the `tools` list passed to the Agent constructor.
-- The SQLite schema lives in `database.py` in the `init_db()` function. Run this function on app startup via the FastAPI `lifespan` context manager.
-- Resend email logic lives exclusively in `email_service.py`. Do not call `resend.Emails.send()` from any other file.
+- Never hardcode API keys. All secrets come from environment variables.
+- Tools live in `apps/mcp-server/server.py` as `@mcp.tool()` decorated functions — not in `agent.py`. The agent server connects to the MCP server over SSE.
+- The PostgreSQL schema lives in `apps/mcp-server/database.py` in the `init_db()` function. It is called on MCP server startup.
+- Resend email logic lives exclusively in `apps/mcp-server/email_service.py`. Do not call `resend.Emails.send()` from any other file.
 - The `/chat` route in FastAPI must always stream responses. Do not change it to a non-streaming endpoint.
 - The Next.js `/api/chat` route handler is the only place the backend URL is referenced on the server side. Never put `NEXT_PUBLIC_API_URL` in client components.
+- `load_dotenv()` must be called before any other imports in `server.py` because `email_service.py` and `database.py` read env vars at module import time.
+- `MCPServerSse` must be constructed with `client_session_timeout_seconds=30` (not the default 5) to handle Neon + Resend latency on `book_appointment`.
 
 ## PR instructions
 - Title format: `[backend]` or `[frontend]` followed by a short description. Example: `[backend] Add reschedule tool`
@@ -347,11 +391,12 @@ Once a salon owner is paying, layer these in one at a time. Do not build any of 
 
 | Service | Monthly cost |
 |---|---|
-| OpenAI Agent SDK + GPT-4o mini | ~$0.002 per conversation |
+| Gemini API (gemini-3.1-flash-lite) | ~$0 for dev/demo (free tier) |
+| OpenAI Agents SDK | Free (open-source, orchestration only) |
 | Resend | Free — 3,000 emails/month |
 | Railway | Free tier — sufficient for one salon |
 | Vercel | Free tier — sufficient for one salon |
-| SQLite | Free — built in, no service needed |
+| Neon PostgreSQL | Free tier — 0.5 GB storage, sufficient for PoV |
 | **Total for one salon, ~200 bookings/month** | **Under $5** |
 
 The PoV costs almost nothing to run. The only investment is build time.
