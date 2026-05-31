@@ -8,6 +8,8 @@ An AI-powered salon booking agent that handles the full appointment lifecycle â€
 
 ## Demo
 
+![Zara â€” AI Booking Assistant chat interface](assets/chat-ui.png)
+
 | Chat Interface | Booking Confirmation |
 |---|---|
 | Client types naturally: *"I want a haircut on Saturday at 2pm"* | Agent confirms slot, fires email, renders booking card |
